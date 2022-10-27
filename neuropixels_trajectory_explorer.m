@@ -268,6 +268,13 @@ controls_h(end+1) = uicontrol('Parent',control_panel,'Style','pushbutton','FontS
 controls_h(end+1) = uicontrol('Parent',control_panel,'Style','pushbutton','FontSize',button_fontsize, ...
     'Units','normalized','Position',button_position,'String','Load/plot histology','Callback',{@probe_histology,probe_atlas_gui});
 
+% (MPM interface)
+controls_h(end+1) = uicontrol('Parent',control_panel,'Style','togglebutton','FontSize',button_fontsize, ...
+    'Units','normalized','Position',button_position,'String','MPM mode','Callback',{@mpm_mode,probe_atlas_gui}); 
+
+
+
+
 set(controls_h(1),'Position',header_text_position+[0,0.9,0,0]);
 align(fliplr(controls_h),'center','distribute');
 
@@ -1112,6 +1119,64 @@ set(gui_data.handles.probe_line,'XData',probe_vector(1,:), ...
 [theta,phi] = cart2sph(diff(probe_ref_vector(1,:)),diff(probe_ref_vector(2,:)),diff(probe_ref_vector(3,:)));
 gui_data.probe_angle = ([theta,phi]/(2*pi))*360;
 guidata(probe_atlas_gui, gui_data);
+
+% Update the slice and probe coordinates
+update_slice(probe_atlas_gui);
+update_probe_coordinates(probe_atlas_gui);
+
+end
+
+function mpm_mode(h,eventdata,probe_atlas_gui)
+
+% Get guidata
+gui_data = guidata(probe_atlas_gui);
+
+if eventdata.Source.Value
+    % Initialize MPM client
+    mpm_client_path = "C:\Users\amarica\Documents\Lab stuff\Manipulator software stuff\MPM_BetaSWInstall\Examples\NstMpmClientDemo\NstMpmClientDemoExe\NstMpmClientAccess.dll";
+    NET.addAssembly(mpm_client_path);
+    import NstMpmClientAccess.*
+    mpm_client = NstMpmClientAccess.NstMpmClient;
+
+    mpm_client.IP_Address = "127.0.0.1";
+    mpm_client.Port = 8080;
+
+    % Save mpm_client in guidata
+    gui_data.mpm_client = mpm_client;
+
+    % Set up timer function for updating probe position
+    mpm_query_rate = 1/5;
+    gui_data.mpm_timer_fcn = timer('TimerFcn', @(~,~)get_mpm_position(probe_atlas_gui), 'Period', 1/mpm_query_rate, 'ExecutionMode','fixedDelay', 'TasksToExecute', inf);
+    start(gui_data.mpm_timer_fcn)
+else
+    stop(gui_data.mpm_timer_fcn)
+    delete(gui_data.mpm_timer_fcn)
+end
+
+% Update gui data
+guidata(probe_atlas_gui, gui_data);
+
+end
+
+function get_mpm_position(probe_atlas_gui)
+
+% Get guidata
+gui_data = guidata(probe_atlas_gui);
+
+% Query MPM app for probe information
+gui_data.mpm_client.QueryMpmApplication;
+mpm_probe_info = gui_data.mpm_client.AppData.GetProbe(0);
+
+% Calculate position of probe
+probe_tip = [mpm_probe_info.Tip_X_ML; mpm_probe_info.Tip_Y_AP; mpm_probe_info.Tip_Z_DV];
+
+[x, y, z] = sph2cart(deg2rad(mpm_probe_info.Polar), deg2rad(90-mpm_probe_info.Pitch), mpm_probe_info.Length); 
+probe_top = probe_tip + [x; y; z];
+
+probe_vector = [probe_top, probe_tip];
+
+set(gui_data.handles.probe_line,'XData',probe_vector(1,:), ...
+    'YData',probe_vector(2,:),'ZData',probe_vector(3,:));
 
 % Update the slice and probe coordinates
 update_slice(probe_atlas_gui);
