@@ -272,9 +272,6 @@ controls_h(end+1) = uicontrol('Parent',control_panel,'Style','pushbutton','FontS
 controls_h(end+1) = uicontrol('Parent',control_panel,'Style','togglebutton','FontSize',button_fontsize, ...
     'Units','normalized','Position',button_position,'String','MPM mode','Callback',{@mpm_mode,probe_atlas_gui}); 
 
-
-
-
 set(controls_h(1),'Position',header_text_position+[0,0.9,0,0]);
 align(fliplr(controls_h),'center','distribute');
 
@@ -1132,6 +1129,7 @@ function mpm_mode(h,eventdata,probe_atlas_gui)
 gui_data = guidata(probe_atlas_gui);
 
 if eventdata.Source.Value
+
     % Initialize MPM client
     mpm_client_path = "C:\Users\amarica\Documents\Lab stuff\Manipulator software stuff\MPM_BetaSWInstall\Examples\NstMpmClientDemo\NstMpmClientDemoExe\NstMpmClientAccess.dll";
     NET.addAssembly(mpm_client_path);
@@ -1143,14 +1141,21 @@ if eventdata.Source.Value
 
     % Save mpm_client in guidata
     gui_data.mpm_client = mpm_client;
+    guidata(probe_atlas_gui, gui_data);
 
     % Set up timer function for updating probe position
-    mpm_query_rate = 1/5;
+    mpm_query_rate = 5;
     gui_data.mpm_timer_fcn = timer('TimerFcn', @(~,~)get_mpm_position(probe_atlas_gui), 'Period', 1/mpm_query_rate, 'ExecutionMode','fixedDelay', 'TasksToExecute', inf);
     start(gui_data.mpm_timer_fcn)
+
+    % turn button green 
+    h.BackgroundColor = [0.39,0.83,0.07];
 else
     stop(gui_data.mpm_timer_fcn)
     delete(gui_data.mpm_timer_fcn)
+
+    % turn button back to normal
+    h.BackgroundColor = [0.94,0.94,0.94];
 end
 
 % Update gui data
@@ -1168,20 +1173,47 @@ gui_data.mpm_client.QueryMpmApplication;
 mpm_probe_info = gui_data.mpm_client.AppData.GetProbe(0);
 
 % Calculate position of probe
-probe_tip = [mpm_probe_info.Tip_X_ML; mpm_probe_info.Tip_Y_AP; mpm_probe_info.Tip_Z_DV];
+probe_tip = [mpm_probe_info.Tip_X_ML; mpm_probe_info.Tip_Y_AP; -mpm_probe_info.Tip_Z_DV];
 
-[x, y, z] = sph2cart(deg2rad(mpm_probe_info.Polar), deg2rad(90-mpm_probe_info.Pitch), mpm_probe_info.Length); 
+% (mpm 0 = straight down --> rotate to move from tip to top)
+% using length of recording sites not the actual length of the probe! 
+[x, y, z] = sph2cart(deg2rad(mpm_probe_info.Polar), deg2rad(270-mpm_probe_info.Pitch), gui_data.probe_length); 
 probe_top = probe_tip + [x; y; z];
 
 probe_vector = [probe_top, probe_tip];
 
+% update angles
+gui_data.probe_angle = [mpm_probe_info.Polar, 90-mpm_probe_info.Pitch];
+
+% change probe location
 set(gui_data.handles.probe_line,'XData',probe_vector(1,:), ...
     'YData',probe_vector(2,:),'ZData',probe_vector(3,:));
+
+% Update the probe and trajectory reference
+ml_lim = xlim(gui_data.handles.axes_atlas);
+ap_lim = ylim(gui_data.handles.axes_atlas);
+dv_lim = zlim(gui_data.handles.axes_atlas);
+max_ref_length = norm([range(ap_lim);range(dv_lim);range(ml_lim)]);
+[x, y, z] = sph2cart(deg2rad(gui_data.probe_angle(1)), deg2rad(gui_data.probe_angle(2)), max_ref_length); 
+
+% Move probe reference (draw line through point and DV 0 with max length)
+probe_ref_top_ap = interp1(probe_tip(3)+[0,z],probe_tip(2)+[0,y],0,'linear','extrap');
+probe_ref_top_ml = interp1(probe_tip(3)+[0,z],probe_tip(1)+[0,x],0,'linear','extrap');
+
+probe_ref_top = [probe_ref_top_ml,probe_ref_top_ap,0];
+probe_ref_bottom = probe_ref_top + [x,y,z];
+probe_ref_vector = [probe_ref_top;probe_ref_bottom]';
+
+set(gui_data.handles.probe_ref_line,'XData',probe_ref_vector(1,:), ...
+    'YData',probe_ref_vector(2,:), ...
+    'ZData',probe_ref_vector(3,:));
+
+% Update gui data
+guidata(probe_atlas_gui, gui_data);
 
 % Update the slice and probe coordinates
 update_slice(probe_atlas_gui);
 update_probe_coordinates(probe_atlas_gui);
-
 end
 
 %% Load and format structure tree
